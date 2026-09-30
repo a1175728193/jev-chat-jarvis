@@ -145,9 +145,15 @@ class SoulAdapter : ChatAppAdapter {
         val avatarEdge = (width * AVATAR_EDGE_RATIO).toInt()
         rows.sortBy { it.top }
         val msgs = rows.map { r ->
-            val dl = kotlin.math.abs(r.left - avatarEdge)
-            val dr = kotlin.math.abs((width - avatarEdge) - r.right)
-            Msg(if (dr < dl) "me" else "other", r.text)
+            val dl = kotlin.math.abs(r.left - avatarEdge).toFloat()
+            val dr = kotlin.math.abs((width - avatarEdge) - r.right).toFloat()
+            // Hysteresis: call it "me" only when the right column is CLEARLY the
+            // closer one. Soul slides a new bubble into place and its
+            // mid-animation bounds land near the middle, and a bare "dr < dl"
+            // also misreads a long incoming message that reaches across the
+            // screen. See ChatSnapshot.signature() for why a flickering side
+            // used to wipe the candidate panel.
+            Msg(if (dr * SIDE_MARGIN < dl) "me" else "other", r.text)
         }
         return ChatSnapshot(title, msgs)
     }
@@ -179,6 +185,9 @@ class SoulAdapter : ChatAppAdapter {
          * but 0.10 sits closer to the real column.
          */
         private const val AVATAR_EDGE_RATIO = 0.10
+
+        /** How much closer the right column must be before a row counts as mine. */
+        private const val SIDE_MARGIN = 1.35f
 
         /** A transcript sits roughly one bubble-height below its bubble. */
         private const val TRANSCRIPT_GAP = 400
