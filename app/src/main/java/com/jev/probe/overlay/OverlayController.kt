@@ -68,6 +68,20 @@ class OverlayController(private val ctx: Context) {
     private var lastJudgment: Analysis? = null
     private var lastFill: ((String) -> Unit)? = null
 
+    /**
+     * Candidates that arrived BEFORE the judgment did.
+     *
+     * The judge and the draft+rank run in parallel on the service's two worker
+     * threads, and which one lands first is a pure race decided by the two
+     * providers' relative speed. On a fast draft route (DeepSeek answering in
+     * ~100 ms) the candidates reach the panel 1-3 s before the judge's reply
+     * does. [showReplies] used to just `return` while [lastJudgment] was still
+     * null, so the candidates were dropped silently: every request had returned
+     * HTTP 200, the judgment rendered, and the reply slot sat on "生成中…"
+     * forever. Hold them here and fold them into the judgment instead.
+     */
+    private var pendingReplies: List<RankedReply>? = null
+
     /** Set when [showReplies] was handed a draftAndRank failure, so the panel
      *  can say so instead of silently showing "（未生成候选回复）". */
     private var replyError: String? = null
@@ -310,6 +324,7 @@ class OverlayController(private val ctx: Context) {
         lastFill = null
         noteText = null
         replyError = null
+        pendingReplies = null
         contentBox?.removeAllViews()
     }
 
@@ -373,14 +388,25 @@ class OverlayController(private val ctx: Context) {
     }
 
     fun showJudgment(a: Analysis) {
-        lastJudgment = a
-        render(a, generating = true)
+        val pending = pendingReplies
+        pendingReplies = null
+        val merged = if (pending != null) a.copy(rankedReplies = pending) else a
+        lastJudgment = merged
+        // Only wait on the reply slot when the candidates really have not landed.
+        render(merged, generating = pending == null)
     }
 
     fun showReplies(ranked: List<RankedReply>, error: String? = null, onFill: (String) -> Unit) {
         lastFill = onFill
         replyError = error
-        val a = lastJudgment?.copy(rankedReplies = ranked) ?: return
+        val base = lastJudgment
+        if (base == null) {
+            // Judgment has not landed yet — hold them for [showJudgment] instead
+            // of dropping them (this used to be a silent `return`).
+            pendingReplies = ranked
+            return
+        }
+        val a = base.copy(rankedReplies = ranked)
         lastJudgment = a
         render(a, generating = false)
     }
