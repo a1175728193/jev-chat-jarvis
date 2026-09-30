@@ -20,13 +20,12 @@ jobs:
           java-version: '17'
 
       # 关键：不要用 android-actions/setup-android —— 它会去装早已下架的
-      # "tools" 包，直接 sdkmanager failed（v1 实测踩过）。GitHub 的 runner
-      # 自带 Android SDK，这里只补平台包并接受许可，全部容错。
+      # "tools" 包，直接 sdkmanager failed。GitHub 的 runner 自带 Android SDK，
+      # 这里只补平台包并接受许可，全部容错。
       - name: 准备 Android SDK
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           echo "SDK=$SDK"
           SDKM="$(find "$SDK/cmdline-tools" -maxdepth 3 -name sdkmanager 2>/dev/null | head -1)"
           echo "sdkmanager=$SDKM"
@@ -34,22 +33,35 @@ jobs:
             yes | "$SDKM" --licenses > /dev/null 2>&1 || true
             "$SDKM" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
           fi
-          echo "--- platforms ---"
           ls "$SDK/platforms" 2>/dev/null || true
-          echo "--- build-tools ---"
           ls "$SDK/build-tools" 2>/dev/null || true
 
-      # 官方用自己的 keystore 签，没给我们 —— 这里自己生成一个。
-      - name: 生成签名 keystore
+      # 同一把 keystore 跨构建复用 —— 否则每次签名都不同，用户每次都得先卸载，
+      # 而卸载会清空 App 内的密钥和设置。key 固定，缓存命中即复用。
+      - name: 取回已有 keystore
+        id: kscache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/jev-ks
+          key: jev-release-keystore-v1
+
+      - name: 生成或复用 keystore
         run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/jev-release.jks" \
-            -alias jev \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass jevpass1234 -keypass jevpass1234 \
-            -dname "CN=Jev Custom, OU=Self, O=Self, L=NA, ST=NA, C=CN"
+          mkdir -p "$RUNNER_TEMP/jev-ks"
+          KS="$RUNNER_TEMP/jev-ks/jev-release.jks"
+          if [ -f "$KS" ]; then
+            echo "♻️ 复用已有 keystore（签名一致，可直接覆盖安装）"
+          else
+            echo "🆕 首次生成 keystore"
+            keytool -genkeypair -v \
+              -keystore "$KS" \
+              -alias jev \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass jevpass1234 -keypass jevpass1234 \
+              -dname "CN=Jev Custom, OU=Self, O=Self, L=NA, ST=NA, C=CN"
+          fi
           printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-            "$RUNNER_TEMP/jev-release.jks" jevpass1234 jev jevpass1234 \
+            "$KS" jevpass1234 jev jevpass1234 \
             > "$RUNNER_TEMP/jev-release.properties"
 
       - name: 编译 release APK
