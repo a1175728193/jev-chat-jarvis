@@ -1,5 +1,6 @@
 package com.jev.probe.jev
 
+import android.util.Log
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -41,6 +42,7 @@ class ApiException(
  */
 object HttpJson {
 
+    private const val TAG = "JEVASSIST"
     private const val MAX_ATTEMPTS = 3
 
     /**
@@ -70,8 +72,14 @@ object HttpJson {
                     extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
                 }
                 val bytes = body.toString().toByteArray(Charsets.UTF_8)
+                // 显式声明定长 body。不设时 HttpURLConnection 会退化成
+                // Transfer-Encoding: chunked，实测在部分链路上请求发出去后
+                // 永远等不到响应（界面就一直停在「生成中…」）。
+                conn.setFixedLengthStreamingMode(bytes.size)
+                Log.d(TAG, "-> " + route + " " + url + " (" + bytes.size + "B) attempt=" + (attempt + 1))
                 conn.outputStream.use { os: OutputStream -> os.write(bytes) }
                 val code = conn.responseCode
+                Log.d(TAG, "<- " + route + " HTTP " + code)
                 if (code == 429 || code == 529) {
                     last = ApiException(route, code, "服务繁忙，已重试")
                     attempt++
@@ -94,11 +102,13 @@ object HttpJson {
                 Thread.currentThread().interrupt()
                 throw e
             } catch (e: ApiException) {
+                Log.w(TAG, "!! " + route + " " + e.message)
                 if (e.status != null && e.status in 400..499) throw e  // client error: no retry
                 last = e
                 attempt++
                 if (attempt < MAX_ATTEMPTS) Thread.sleep(500L * (1L shl attempt))
             } catch (e: Exception) {
+                Log.w(TAG, "!! " + route + " transport: " + e.javaClass.simpleName + ": " + e.message)
                 last = ApiException(route, null, describe(e))
                 attempt++
                 if (attempt < MAX_ATTEMPTS) Thread.sleep(500L * (1L shl attempt))
