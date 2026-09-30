@@ -32,9 +32,19 @@ data class ChatSnapshot(
 ) {
     val latestFrom: String? get() = messages.lastOrNull()?.side
 
-    /** A stable signature of the last few messages, to detect real changes. */
+    /**
+     * A stable signature of the last few messages, to detect real changes.
+     *
+     * Deliberately EXCLUDES `side`: an adapter's me/other classification can
+     * flicker while the app animates a newly arrived bubble into place (seen on
+     * Soul — the same message read "other" and then "me" 0.4 s apart). With the
+     * side in the signature that flicker looked like a brand-new message, so the
+     * capture service cancelled and restarted its analysis and wiped the
+     * candidates it had just produced off the panel a moment after they showed
+     * up. The text is what actually changes when a message arrives.
+     */
     fun signature(): String =
-        messages.takeLast(6).joinToString("|") { "${it.side}:${it.text}" }
+        messages.takeLast(6).joinToString("|") { it.text }
 }
 
 /** Jev's judgment result for one snapshot, plus the ranked candidate replies. */
