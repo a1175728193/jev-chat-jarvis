@@ -402,6 +402,7 @@ open class ChatCaptureService : AccessibilityService() {
                     var replyError: String? = null
                     val ranked = try { client.draftAndRank(snapshot, rel, ctx) } catch (e: Exception) {
                         replyError = e.message ?: e.javaClass.simpleName
+                        Log.w(TAG, "draftAndRank failed: " + e.javaClass.simpleName + ": " + e.message)
                         emptyList()
                     }
                     main.post {
